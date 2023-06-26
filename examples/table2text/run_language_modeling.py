@@ -27,7 +27,7 @@ import os
 import torch
 from ml_swissknife import utils
 from transformers import HfArgumentParser, MODEL_WITH_LM_HEAD_MAPPING, set_seed
-from transformers.models.gpt2 import GPT2Tokenizer
+from transformers import AutoTokenizer
 from transformers.optimization import get_linear_schedule_with_warmup
 
 from private_transformers import PrivacyEngine
@@ -96,28 +96,28 @@ def main():
         warnings.filterwarnings("error")
 
     # Low rank models need special models!
-    from transformers.models.gpt2 import GPT2Config, GPT2LMHeadModel
+    from transformers import OPTConfig, OPTForCausalLM, AutoTokenizer
 
     # Config.
-    config = GPT2Config.from_pretrained(model_args.model_name_or_path, cache_dir=model_args.cache_dir)
+    config = OPTConfig.from_pretrained(model_args.model_name_or_path, cache_dir=model_args.cache_dir)
     config.return_dict = True
     config.tie_word_embeddings = False
 
     # Tokenizer; `bos_token` and `eos_token` is the same for GPT2; both are 50256.
-    tokenizer = GPT2Tokenizer.from_pretrained(model_args.model_name_or_path, cache_dir=model_args.cache_dir)
+    tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, cache_dir=model_args.cache_dir)
 
     # Model.
-    gpt2 = GPT2LMHeadModel.from_pretrained(
+    opt = OPTForCausalLM.from_pretrained(
         model_args.model_name_or_path,
         config=config,
         cache_dir=model_args.cache_dir,
     )
-    print(f'base gpt2 model: {model_args.model_name_or_path}')
-    print(gpt2)
+    print(f'base opt model: {model_args.model_name_or_path}')
+    print(opt)
 
     # Clone the embedding into the lm_head for better initialization.
-    lm_head = gpt2.get_output_embeddings()
-    embedding = gpt2.get_input_embeddings()
+    lm_head = opt.get_output_embeddings()
+    embedding = opt.get_input_embeddings()
     lm_head.weight.data.copy_(embedding.weight.data)
     print(f'Cloning initial embedding into lm_head, '
           f'checking norms... \n'
@@ -141,12 +141,12 @@ def main():
     print('adapt the size of lm_head and input_embeddings to include [PAD]')
     print('use avg-based initialization')
 
-    input_embeddings_before = gpt2.get_input_embeddings().weight
-    lm_head_before = gpt2.get_output_embeddings().weight
-    gpt2.resize_token_embeddings(len(tokenizer))
+    input_embeddings_before = opt.get_input_embeddings().weight
+    lm_head_before = opt.get_output_embeddings().weight
+    opt.resize_token_embeddings(len(tokenizer))
 
-    input_embeddings_after = gpt2.get_input_embeddings().weight
-    lm_head_after = gpt2.get_output_embeddings().weight
+    input_embeddings_after = opt.get_input_embeddings().weight
+    lm_head_after = opt.get_output_embeddings().weight
     print(
         f'before lm_head.weight.size() = {lm_head_before.size()}, '
         f'input_embeddings_before.size() = {input_embeddings_before.size()}'
@@ -163,9 +163,9 @@ def main():
     input_embeddings_after.data[-1] = input_embeddings_before.mean(dim=0)
 
     print('double check: ')
-    print('embedding size', gpt2.get_input_embeddings().weight.size())
-    print('lm_head size', gpt2.get_output_embeddings().weight.size())
-    model = gpt2
+    print('embedding size', opt.get_input_embeddings().weight.size())
+    print('lm_head size', opt.get_output_embeddings().weight.size())
+    model = opt
 
     train_dataset, val_dataset, eval_dataset, data_collator = get_all_datasets(
         config=config,

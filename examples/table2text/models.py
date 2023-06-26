@@ -14,7 +14,7 @@
 
 import torch
 from torch import nn
-from transformers import GPT2PreTrainedModel, GPT2LMHeadModel
+from transformers import PreTrainedModel, OPTLMHeadModel
 
 
 class _View(nn.Module):
@@ -26,19 +26,19 @@ class _View(nn.Module):
         return x.reshape(*self.shape)
 
 
-class PrefixTuner(GPT2PreTrainedModel):
+class PrefixTuner(PreTrainedModel):
     """A minimalistic implementation of the core components."""
 
-    def __init__(self, config, model_args, gpt2=None):
+    def __init__(self, config, model_args, opt=None):
         super(PrefixTuner, self).__init__(config=config)
 
-        # Instantiate a GPT-2, and DON'T optimizer it!
-        if gpt2 is None:
-            self.gpt2 = GPT2LMHeadModel.from_pretrained(
+        # Instantiate a OPT model, and DON'T optimizer it!
+        if opt is None:
+            self.opt = OPTLMHeadModel.from_pretrained(
                 model_args.model_name_or_path, config=config, cache_dir=model_args.cache_dir,
             )
         else:
-            self.gpt2 = gpt2
+            self.opt = opt
 
         self.register_buffer('extra_prefix_ids', torch.arange(model_args.prefix_len))
         # TODO: Also introduce the easier net.
@@ -60,11 +60,11 @@ class PrefixTuner(GPT2PreTrainedModel):
         return past_key_values
 
     def state_dict(self):
-        """Avoid storing GPT-2, since it's not even trained."""
+        """Avoid storing OPT, since it's not even trained."""
         return self.extra_prefix_net.state_dict()
 
     def load_state_dict(self, state_dict):
-        """Avoid loading GPT-2, since it's not even trained."""
+        """Avoid loading OPT, since it's not even trained."""
         self.extra_prefix_net.load_state_dict(state_dict)
 
     @property
@@ -90,7 +90,7 @@ class PrefixTuner(GPT2PreTrainedModel):
         **kwargs,
     ):
         past_key_values = self.make_past_key_values(bsz=input_ids.size(0))
-        return self.gpt2(
+        return self.opt(
             input_ids=input_ids,
             past_key_values=past_key_values,
             attention_mask=attention_mask,
@@ -111,7 +111,7 @@ class PrefixTuner(GPT2PreTrainedModel):
     def generate(self, input_ids, num_beams, **kwargs):
         # Additional files also changed:
         # src/transformers/generation_utils.py
-        # src/transformers/models/gpt2/modeling_gpt2.py
+        # src/transformers/models/opt/modeling_gpt2.py
 
         # --- lxuechen: This part is really error-prone!
         #   A sanity check is to optimize the model for a few updates and check if the beam-search generations changed.
@@ -125,7 +125,7 @@ class PrefixTuner(GPT2PreTrainedModel):
         past_key_values = self.make_past_key_values(bsz=input_ids.size(0) * num_beams)
         # ---
 
-        return self.gpt2.generate(
+        return self.opt.generate(
             input_ids=input_ids,
             num_beams=num_beams,
             past_key_values=past_key_values,
